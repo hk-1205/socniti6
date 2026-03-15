@@ -1,4 +1,5 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
+import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 
 const links = [
@@ -10,6 +11,17 @@ const links = [
 
 export default function Shell({ children }) {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const initials = user
+    ? user.fullName
+        .split(" ")
+        .map((part) => part[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase()
+    : "";
 
   return (
     <div className="min-h-screen">
@@ -33,21 +45,59 @@ export default function Shell({ children }) {
           </nav>
           <div className="flex items-center gap-3">
             {user ? (
-              <>
-                <NavLink
-                  to={user.role === "organizer" ? "/organizer" : "/dashboard"}
-                  className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-white"
-                >
-                  Dashboard
-                </NavLink>
+              <div
+                className="relative"
+                onMouseEnter={() => setMenuOpen(true)}
+                onMouseLeave={() => setMenuOpen(false)}
+              >
                 <button
                   type="button"
-                  onClick={logout}
-                  className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink"
+                  className="flex items-center gap-3 rounded-full border border-ink/10 bg-white/80 py-2 pr-3 pl-2 text-sm font-semibold text-ink shadow-sm backdrop-blur transition hover:bg-white"
                 >
-                  Logout
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-600 text-sm font-semibold text-white">
+                    {initials || "U"}
+                  </span>
+                  <span className="hidden sm:flex flex-col items-start leading-tight">
+                    <span className="text-sm font-semibold">{user.fullName}</span>
+                    <span className="text-xs text-ink/60">{user.role}</span>
+                  </span>
                 </button>
-              </>
+
+                {menuOpen && (
+                  <div className="absolute right-0 mt-2 w-52 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigate("/profile");
+                        setMenuOpen(false);
+                      }}
+                      className="w-full px-4 py-3 text-left text-sm font-medium text-ink hover:bg-gray-50"
+                    >
+                      View Profile
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigate("/settings");
+                        setMenuOpen(false);
+                      }}
+                      className="w-full px-4 py-3 text-left text-sm font-medium text-ink hover:bg-gray-50"
+                    >
+                      Settings
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        logout();
+                        setMenuOpen(false);
+                      }}
+                      className="w-full px-4 py-3 text-left text-sm font-medium text-ink hover:bg-gray-50"
+                    >
+                      Logout
+                    </button>
+                  </div>
+                )}
+              </div>
             ) : (
               <NavLink
                 to="/login"

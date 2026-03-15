@@ -8,6 +8,8 @@ import UserDashboardPage from "./pages/UserDashboardPage";
 import OrganizerDashboardPage from "./pages/OrganizerDashboardPage";
 import DonationsPage from "./pages/DonationsPage";
 import ContactPage from "./pages/ContactPage";
+import ProfilePage from "./pages/ProfilePage";
+import SettingsPage from "./pages/SettingsPage";
 
 function ProtectedRoute({ children, roles }) {
   const { user } = useAuth();
@@ -45,6 +47,22 @@ export default function App() {
           element={
             <ProtectedRoute roles={["organizer", "admin"]}>
               <OrganizerDashboardPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <ProtectedRoute roles={["user", "organizer", "admin"]}>
+              <ProfilePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute roles={["user", "organizer", "admin"]}>
+              <SettingsPage />
             </ProtectedRoute>
           }
         />

@@ -14,12 +14,33 @@ export const AuthProvider = ({ children }) => {
     }
 
     api
-      .get("/api/auth/me", {
-        headers: {
-          Authorization: `Bearer ${token}`
+      .post(
+        "/graphql",
+        {
+          query: `
+            query Me {
+              me {
+                id
+                fullName
+                email
+                role
+              }
+            }
+          `
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      )
+      .then((response) => {
+        if (response.data.data && response.data.data.me) {
+          setUser(response.data.data.me);
+        } else {
+          throw new Error("No user found");
         }
       })
-      .then((response) => setUser(response.data.user))
       .catch(() => {
         setToken("");
         localStorage.removeItem("socniti_token");

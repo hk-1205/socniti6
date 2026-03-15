@@ -12,7 +12,7 @@ const app = express();
 const port = Number(process.env.GATEWAY_PORT || 8080);
 
 const authServiceUrl = process.env.AUTH_SERVICE_URL || "http://localhost:4001/graphql";
-const eventServiceUrl = process.env.EVENT_SERVICE_URL || "http://localhost:4002/graphql";
+const eventServiceUrl = process.env.EVENT_SERVICE_URL || "http://localhost:4005/graphql";
 const chatServiceUrl = process.env.CHAT_SERVICE_URL || "http://localhost:4003/graphql";
 
 const gateway = new ApolloGateway({

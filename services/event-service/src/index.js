@@ -4,7 +4,12 @@ const dotenv = require("dotenv");
 const morgan = require("morgan");
 const connectDb = require("./config/db");
 const eventRoutes = require("./routes/eventRoutes");
+const { ApolloServer } = require("@apollo/server");
+const { startStandaloneServer } = require("@apollo/server/standalone");
+const { buildSubgraphSchema } = require("@apollo/subgraph");
+const { parse } = require("graphql");
 
+dotenv.config({ path: "../../.env" });
 dotenv.config();
 
 const app = express();
@@ -30,11 +35,36 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ message: error.message || "Unexpected server error" });
 });
 
+const typeDefs = parse(`
+  extend schema
+    @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key", "@shareable"])
+  type Query {
+    _eventPing: String
+  }
+`);
+
+const resolvers = {
+  Query: {
+    _eventPing: () => "pong"
+  }
+};
+
+const server = new ApolloServer({
+  schema: buildSubgraphSchema({ typeDefs, resolvers }),
+});
+
 connectDb()
-  .then(() => {
+  .then(async () => {
+    // Start the REST API
     app.listen(port, () => {
-      console.log(`Event service running on port ${port}`);
+      console.log(`Event REST service running on port ${port}`);
     });
+
+    // Start a dummy Subgraph on 4005 for the API Gateway
+    const { url } = await startStandaloneServer(server, {
+      listen: { port: 4005 }
+    });
+    console.log(`Event GraphQL Subgraph placeholder running at ${url}`);
   })
   .catch((error) => {
     console.error("Event service failed to start", error);

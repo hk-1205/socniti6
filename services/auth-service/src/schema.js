@@ -7,6 +7,7 @@ const typeDefs = gql`
   type User @key(fields: "id") {
     id: ID!
     fullName: String!
+    username: String!
     email: String
     phone: String
     role: String!
@@ -29,8 +30,15 @@ const typeDefs = gql`
   }
 
   type Mutation {
+    # Signup with OTP verification (two-factor)
+    signup(fullName: String!, username: String!, email: String!, password: String!, role: String): OtpStatus!
+    verifySignupOtp(email: String!, otp: String!): AuthPayload!
+    
+    # Login with username and password
+    login(username: String!, password: String!): AuthPayload!
+    
+    # Legacy support
     register(fullName: String!, email: String!, password: String!, role: String): OtpStatus!
-    login(email: String!, password: String!): AuthPayload!
     sendOtp(email: String!): OtpStatus!
     verifyOtp(email: String!, otp: String!): AuthPayload!
   }

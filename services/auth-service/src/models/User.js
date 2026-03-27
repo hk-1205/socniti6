@@ -7,6 +7,14 @@ const UserSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    username: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+      minlength: 3,
+    },
     email: {
       type: String,
       required: false,
@@ -35,7 +43,10 @@ const UserSchema = new mongoose.Schema(
       default: false,
     },
     otp: {
-      type: String, // Temporarily store OTP for verification
+      type: String,
+    },
+    otpExpires: {
+      type: Date,
     },
   },
   { timestamps: true }

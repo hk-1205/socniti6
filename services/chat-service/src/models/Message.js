@@ -25,10 +25,12 @@ const messageSchema = new mongoose.Schema(
       enum: ["text", "system"],
       default: "text",
     },
-    readBy: [{
-      userId: String,
-      readAt: Date,
-    }],
+    readBy: [
+      {
+        userId: String,
+        readAt: Date,
+      },
+    ],
   },
   { timestamps: true }
 );

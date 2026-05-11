@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
+const path = require("path");
 const morgan = require("morgan");
 const connectDb = require("./config/db");
 const eventRoutes = require("./routes/eventRoutes");
@@ -14,8 +15,7 @@ const typeDefs = require("./graphql/schema");
 const resolvers = require("./graphql/resolvers");
 const { buildContext } = require("./graphql/context");
 
-dotenv.config({ path: "../../.env" });
-dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 const app = express();
 const restPort = 4002;

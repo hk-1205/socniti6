@@ -3,9 +3,9 @@ const { startStandaloneServer } = require("@apollo/server/standalone");
 const { buildSubgraphSchema } = require("@apollo/subgraph");
 const mongoose = require("mongoose");
 const dotenv = require("dotenv");
+const path = require("path");
 
-dotenv.config({ path: "../../.env" });
-dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 const typeDefs = require("./schema");
 const resolvers = require("./resolvers");
@@ -81,8 +81,4 @@ async function startServer() {
     }
 }
 
-<<<<<<< HEAD
 startServer();
-=======
-startServer();
->>>>>>> 90c1106e58da36673f54e996efed9d44111fd0c0

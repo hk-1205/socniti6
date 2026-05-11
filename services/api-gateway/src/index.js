@@ -10,11 +10,11 @@ const port = 8080;
 console.log("🔄 Starting API Gateway...");
 // GraphQL Federation Gateway
 
-// Hardcoded local URLs for development
-const authServiceUrl = "http://localhost:4001/graphql";
-const eventServiceUrl = "http://localhost:4005/graphql";
-const chatServiceUrl = "http://localhost:4006/graphql";
-const donationServiceUrl = "http://localhost:4008/graphql";
+// GraphQL subgraph URLs can be configured via environment variables.
+const authServiceUrl = process.env.AUTH_SERVICE_URL || "http://localhost:4001";
+const eventServiceUrl = process.env.EVENT_SERVICE_URL || "http://localhost:4005";
+const chatServiceUrl = process.env.CHAT_SERVICE_URL || "http://localhost:4006";
+const donationServiceUrl = process.env.DONATION_SERVICE_URL || "http://localhost:4008";
 
 const gateway = new ApolloGateway({
   supergraphSdl: new IntrospectAndCompose({

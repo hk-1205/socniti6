@@ -3,13 +3,13 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const dotenv = require("dotenv");
+const path = require("path");
 const { ApolloServer } = require("@apollo/server");
 const { startStandaloneServer } = require("@apollo/server/standalone");
 const { buildSubgraphSchema } = require("@apollo/subgraph");
 const { parse } = require("graphql");
 
-dotenv.config({ path: "../../.env" });
-dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 const Donation = require("./models/Donation");
 

@@ -3,14 +3,12 @@ const cors = require("cors");
 const dotenv = require("dotenv");
 const path = require("path");
 const morgan = require("morgan");
-const connectDb = require("./config/db");
+const { prisma } = require("@socniti/database");
 const eventRoutes = require("./routes/eventRoutes");
 const { ApolloServer } = require("@apollo/server");
 const { startStandaloneServer } = require("@apollo/server/standalone");
 const { buildSubgraphSchema } = require("@apollo/subgraph");
-// Event Service with GraphQL Federation
 
-// GraphQL schema and resolvers
 const typeDefs = require("./graphql/schema");
 const resolvers = require("./graphql/resolvers");
 const { buildContext } = require("./graphql/context");
@@ -18,12 +16,11 @@ const { buildContext } = require("./graphql/context");
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 const app = express();
-const restPort = 4002;
-const graphqlPort = 4005;
+const restPort = process.env.EVENT_REST_PORT || 4002;
+const graphqlPort = process.env.EVENT_GRAPHQL_PORT || 4005;
 
 console.log("🔄 Starting Event Service...");
 
-// CORS configuration for development
 app.use(
   cors({
     origin: "*",
@@ -55,7 +52,6 @@ app.use((error, _req, res, _next) => {
   });
 });
 
-// Create Apollo Server
 const server = new ApolloServer({
   schema: buildSubgraphSchema({ typeDefs, resolvers }),
   formatError: (formattedError, error) => {
@@ -68,11 +64,10 @@ const server = new ApolloServer({
   },
 });
 
-connectDb()
+prisma.$connect()
   .then(async () => {
-    console.log("✅ MongoDB connected successfully");
+    console.log("✅ PostgreSQL/Prisma connected successfully");
     
-    // Start REST API
     app.listen(restPort, () => {
       console.log("\n" + "=".repeat(60));
       console.log("🚀 EVENT SERVICE READY");
@@ -83,7 +78,6 @@ connectDb()
       console.log("=".repeat(60) + "\n");
     });
 
-    // Start GraphQL Subgraph
     const { url } = await startStandaloneServer(server, {
       listen: { port: graphqlPort },
       context: buildContext
@@ -102,10 +96,9 @@ connectDb()
     console.error("=".repeat(60));
     console.error("Error:", error.message);
     console.error("\n💡 Possible solutions:");
-    console.error("  1. Check if MongoDB is running");
-    console.error("  2. Verify MONGODB_URI in .env file");
+    console.error("  1. Check if Supabase/Postgres is running");
+    console.error("  2. Verify DATABASE_URL in .env file");
     console.error(`  3. Check if ports ${restPort} or ${graphqlPort} are in use`);
-    console.error("  4. Check database connection settings");
     console.error("=".repeat(60) + "\n");
     process.exit(1);
   });

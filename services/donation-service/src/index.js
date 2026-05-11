@@ -1,6 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const mongoose = require("mongoose");
+const { prisma } = require("@socniti/database");
 const jwt = require("jsonwebtoken");
 const dotenv = require("dotenv");
 const path = require("path");
@@ -11,13 +11,10 @@ const { parse } = require("graphql");
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
-const Donation = require("./models/Donation");
-
 const app = express();
 const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-me";
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/socniti";
-const REST_PORT = 4007;
-const GRAPHQL_PORT = 4008;
+const REST_PORT = process.env.DONATION_REST_PORT || 4007;
+const GRAPHQL_PORT = process.env.DONATION_GRAPHQL_PORT || 4008;
 
 console.log("🔄 Starting Donation Service...");
 
@@ -54,8 +51,10 @@ app.get("/health", (req, res) => {
 
 app.get("/api/donations/event/:eventId", async (req, res) => {
   try {
-    const donations = await Donation.find({ eventId: req.params.eventId })
-      .sort({ createdAt: -1 });
+    const donations = await prisma.donation.findMany({ 
+        where: { eventId: req.params.eventId },
+        orderBy: { createdAt: 'desc' }
+    });
     
     const stats = {
       totalMonetary: donations
@@ -89,17 +88,33 @@ app.post("/api/donations", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Item and quantity are required for item donations" });
     }
 
-    const donation = await Donation.create({
-      eventId,
-      donorId: req.user.sub || req.user.id,
-      donorName: req.user.username || req.user.fullName || "Anonymous",
-      amount: type === "monetary" ? amount : 0,
-      item: type === "item" ? item : null,
-      quantity: type === "item" ? quantity : null,
-      type,
-      status: "completed",
-      message,
+    const donation = await prisma.donation.create({
+        data: {
+          eventId,
+          donorId: req.user.sub || req.user.id,
+          donorName: req.user.username || req.user.fullName || "Anonymous",
+          amount: type === "monetary" ? amount : 0,
+          item: type === "item" ? item : null,
+          quantity: type === "item" ? quantity : null,
+          type,
+          status: "completed",
+          message,
+        }
     });
+
+    // Also update fulfilled count in Event DonationNeeds if applicable
+    if (type === "item") {
+        const event = await prisma.event.findUnique({ where: { id: eventId }, include: { donationNeeds: true } });
+        if (event) {
+            const need = event.donationNeeds.find(n => n.item.toLowerCase() === item.toLowerCase());
+            if (need) {
+                await prisma.donationNeed.update({
+                    where: { id: need.id },
+                    data: { fulfilled: { increment: quantity } }
+                });
+            }
+        }
+    }
 
     res.status(201).json({ donation });
   } catch (err) {
@@ -176,7 +191,10 @@ const typeDefs = parse(`
 const resolvers = {
   Query: {
     eventDonations: async (_, { eventId }) => {
-      const donations = await Donation.find({ eventId }).sort({ createdAt: -1 });
+      const donations = await prisma.donation.findMany({ 
+          where: { eventId },
+          orderBy: { createdAt: 'desc' }
+      });
       
       const stats = {
         totalMonetary: donations
@@ -190,7 +208,7 @@ const resolvers = {
 
       return {
         donations: donations.map(d => ({
-          id: d._id.toString(),
+          id: d.id,
           eventId: d.eventId,
           donorId: d.donorId,
           donorName: d.donorName,
@@ -210,11 +228,13 @@ const resolvers = {
         throw new Error("Authentication required");
       }
 
-      const donations = await Donation.find({ donorId: context.user.sub || context.user.id })
-        .sort({ createdAt: -1 });
+      const donations = await prisma.donation.findMany({ 
+          where: { donorId: context.user.sub || context.user.id },
+          orderBy: { createdAt: 'desc' }
+      });
 
       return donations.map(d => ({
-        id: d._id.toString(),
+        id: d.id,
         eventId: d.eventId,
         donorId: d.donorId,
         donorName: d.donorName,
@@ -245,20 +265,35 @@ const resolvers = {
         throw new Error("Item and quantity are required for item donations");
       }
 
-      const donation = await Donation.create({
-        eventId,
-        donorId: context.user.sub || context.user.id,
-        donorName: context.user.username || context.user.fullName || "Anonymous",
-        amount: type === "monetary" ? amount : 0,
-        item: type === "item" ? item : null,
-        quantity: type === "item" ? quantity : null,
-        type,
-        status: "completed",
-        message,
+      const donation = await prisma.donation.create({
+        data: {
+            eventId,
+            donorId: context.user.sub || context.user.id,
+            donorName: context.user.username || context.user.fullName || "Anonymous",
+            amount: type === "monetary" ? amount : 0,
+            item: type === "item" ? item : null,
+            quantity: type === "item" ? quantity : null,
+            type,
+            status: "completed",
+            message,
+        }
       });
 
+      if (type === "item") {
+          const event = await prisma.event.findUnique({ where: { id: eventId }, include: { donationNeeds: true } });
+          if (event) {
+              const need = event.donationNeeds.find(n => n.item.toLowerCase() === item.toLowerCase());
+              if (need) {
+                  await prisma.donationNeed.update({
+                      where: { id: need.id },
+                      data: { fulfilled: { increment: quantity } }
+                  });
+              }
+          }
+      }
+
       return {
-        id: donation._id.toString(),
+        id: donation.id,
         eventId: donation.eventId,
         donorId: donation.donorId,
         donorName: donation.donorName,
@@ -288,13 +323,9 @@ const server = new ApolloServer({
 });
 
 // Start services
-mongoose
-  .connect(MONGODB_URI, { 
-    serverSelectionTimeoutMS: 30000,
-    socketTimeoutMS: 45000,
-  })
+prisma.$connect()
   .then(async () => {
-    console.log("✅ MongoDB connected successfully");
+    console.log("✅ PostgreSQL/Prisma connected successfully");
 
     // Start REST API
     app.listen(REST_PORT, () => {
@@ -338,7 +369,7 @@ mongoose
     console.error("=".repeat(60));
     console.error("Error:", error.message);
     console.error("\n💡 Possible solutions:");
-    console.error("  1. Check if MongoDB is running");
+    console.error("  1. Check if PostgreSQL/Supabase is running");
     console.error(`  2. Check if ports ${REST_PORT} or ${GRAPHQL_PORT} are in use`);
     console.error("=".repeat(60) + "\n");
     process.exit(1);

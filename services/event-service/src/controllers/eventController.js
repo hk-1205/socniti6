@@ -1,40 +1,52 @@
-const Event = require("../models/Event");
+const { prisma } = require("@socniti/database");
 const { toSlug, EVENT_CATEGORIES } = require("@socniti/shared");
 const { distanceInKm } = require("../utils/geo");
 
 const serializeEvent = (event, viewerCoordinates) => {
   const base = {
-    id: event._id,
+    id: event.id,
     title: event.title,
     slug: event.slug,
     description: event.description,
     category: event.category,
-    imageUrl: event.imageUrl,
+    imageUrl: event.imageUrl || null,
     organizerId: event.organizerId,
-    organizerName: event.organizerName,
+    organizerName: event.organizerName || null,
     locationName: event.locationName,
-    address: event.address,
-    city: event.city,
-    state: event.state,
-    coordinates: event.coordinates,
+    address: event.address || null,
+    city: event.city || null,
+    state: event.state || null,
+    coordinates: { lat: event.lat, lng: event.lng },
     startsAt: event.startsAt,
     endsAt: event.endsAt,
     maxParticipants: event.maxParticipants,
     currentParticipants: event.currentParticipants,
     waitlistCount: event.waitlistCount,
     status: event.status,
-    donationNeeds: event.donationNeeds,
+    donationNeeds: event.donationNeeds || [],
     averageRating: event.averageRating,
     totalReviews: event.totalReviews,
-    createdAt: event.createdAt
+    createdAt: event.createdAt,
+    participants: (event.participants || []).filter(p => p.status === "joined").map(p => ({
+        userId: p.userId,
+        fullName: p.fullName || null,
+        email: p.email || null,
+        joinedAt: p.joinedAt
+    })),
+    waitlist: (event.participants || []).filter(p => p.status === "waitlist").map(p => ({
+        userId: p.userId,
+        fullName: p.fullName || null,
+        email: p.email || null,
+        joinedAt: p.joinedAt
+    }))
   };
 
   if (viewerCoordinates?.lat && viewerCoordinates?.lng) {
     base.distanceKm = distanceInKm(
       viewerCoordinates.lat,
       viewerCoordinates.lng,
-      event.coordinates.lat,
-      event.coordinates.lng
+      event.lat,
+      event.lng
     );
   }
 
@@ -44,25 +56,30 @@ const serializeEvent = (event, viewerCoordinates) => {
 const listEvents = async (req, res) => {
   const { search, category, city, status, date, lat, lng, maxDistanceKm, organizerId } = req.query;
 
-  const query = {};
+  const where = {};
   if (search) {
-    query.$or = [
-      { title: { $regex: search, $options: "i" } },
-      { description: { $regex: search, $options: "i" } }
+    where.OR = [
+      { title: { contains: search, mode: "insensitive" } },
+      { description: { contains: search, mode: "insensitive" } }
     ];
   }
-  if (category) query.category = category;
-  if (city) query.city = city;
-  if (status) query.status = status;
-  if (organizerId) query.organizerId = organizerId;
+  if (category) where.category = category;
+  if (city) where.city = city;
+  if (status) where.status = status;
+  if (organizerId) where.organizerId = organizerId;
   if (date) {
     const start = new Date(date);
     const end = new Date(date);
     end.setDate(end.getDate() + 1);
-    query.startsAt = { $gte: start, $lt: end };
+    where.startsAt = { gte: start, lt: end };
   }
 
-  const events = await Event.find(query).sort({ startsAt: 1 });
+  const events = await prisma.event.findMany({
+      where,
+      orderBy: { startsAt: 'asc' },
+      include: { participants: true, donationNeeds: true }
+  });
+
   const viewerCoordinates = lat && lng ? { lat: Number(lat), lng: Number(lng) } : null;
   let data = events.map((event) => serializeEvent(event, viewerCoordinates));
 
@@ -83,7 +100,10 @@ const listEvents = async (req, res) => {
 };
 
 const getEventBySlug = async (req, res) => {
-  const event = await Event.findOne({ slug: req.params.slug });
+  const event = await prisma.event.findUnique({
+      where: { slug: req.params.slug },
+      include: { participants: true, donationNeeds: true }
+  });
   if (!event) {
     return res.status(404).json({ message: "Event not found" });
   }
@@ -92,37 +112,57 @@ const getEventBySlug = async (req, res) => {
 };
 
 const createEvent = async (req, res) => {
-  const slugBase = toSlug(req.body.title);
-  const slug = `${slugBase}-${Date.now().toString().slice(-6)}`;
+  try {
+      const user = await prisma.user.findUnique({ where: { id: req.user.sub } });
+      if (!user) return res.status(404).json({ message: "User not found" });
+      if (user.role === "organizer" && !user.isOrganizerApproved) {
+          return res.status(403).json({ message: "Your organizer account must be verified by an admin." });
+      }
 
-  const event = await Event.create({
-    title: req.body.title,
-    slug,
-    description: req.body.description,
-    category: req.body.category,
-    imageUrl: req.body.imageUrl || "",
-    organizerId: req.user.sub,
-    organizerName: req.body.organizerName || "",
-    locationName: req.body.locationName,
-    address: req.body.address || "",
-    city: req.body.city || "",
-    state: req.body.state || "",
-    coordinates: req.body.coordinates,
-    startsAt: req.body.startsAt,
-    endsAt: req.body.endsAt,
-    maxParticipants: req.body.maxParticipants || 50,
-    status: req.body.status || "upcoming",
-    donationNeeds: req.body.donationNeeds || []
-  });
+      const slugBase = toSlug(req.body.title);
+      const slug = `${slugBase}-${Date.now().toString().slice(-6)}`;
 
-  return res.status(201).json({
-    message: "Event created",
-    event: serializeEvent(event)
-  });
+      const event = await prisma.event.create({
+          data: {
+              title: req.body.title,
+              slug,
+              description: req.body.description,
+              category: req.body.category,
+              imageUrl: req.body.imageUrl || "",
+              organizerId: req.user.sub,
+              organizerName: req.body.organizerName || "",
+              locationName: req.body.locationName,
+              address: req.body.address || "",
+              city: req.body.city || "",
+              state: req.body.state || "",
+              lat: req.body.coordinates.lat,
+              lng: req.body.coordinates.lng,
+              startsAt: new Date(req.body.startsAt),
+              endsAt: req.body.endsAt ? new Date(req.body.endsAt) : null,
+              maxParticipants: req.body.maxParticipants || 50,
+              status: req.body.status || "upcoming",
+              donationNeeds: {
+                  create: (req.body.donationNeeds || []).map(need => ({
+                      item: need.item,
+                      quantity: need.quantity,
+                      fulfilled: need.fulfilled || 0
+                  }))
+              }
+          },
+          include: { participants: true, donationNeeds: true }
+      });
+
+      return res.status(201).json({
+          message: "Event created",
+          event: serializeEvent(event)
+      });
+  } catch (error) {
+      return res.status(500).json({ message: error.message });
+  }
 };
 
 const updateEvent = async (req, res) => {
-  const event = await Event.findOne({ slug: req.params.slug });
+  let event = await prisma.event.findUnique({ where: { slug: req.params.slug } });
   if (!event) {
     return res.status(404).json({ message: "Event not found" });
   }
@@ -131,8 +171,40 @@ const updateEvent = async (req, res) => {
     return res.status(403).json({ message: "Only the organizer can update this event" });
   }
 
-  Object.assign(event, req.body);
-  await event.save();
+  const updateData = {};
+  if (req.body.title) updateData.title = req.body.title;
+  if (req.body.description) updateData.description = req.body.description;
+  if (req.body.category) updateData.category = req.body.category;
+  if (req.body.imageUrl !== undefined) updateData.imageUrl = req.body.imageUrl;
+  if (req.body.locationName) updateData.locationName = req.body.locationName;
+  if (req.body.address !== undefined) updateData.address = req.body.address;
+  if (req.body.city !== undefined) updateData.city = req.body.city;
+  if (req.body.state !== undefined) updateData.state = req.body.state;
+  if (req.body.coordinates) {
+      updateData.lat = req.body.coordinates.lat;
+      updateData.lng = req.body.coordinates.lng;
+  }
+  if (req.body.startsAt) updateData.startsAt = new Date(req.body.startsAt);
+  if (req.body.endsAt !== undefined) updateData.endsAt = req.body.endsAt ? new Date(req.body.endsAt) : null;
+  if (req.body.maxParticipants) updateData.maxParticipants = req.body.maxParticipants;
+  if (req.body.status) updateData.status = req.body.status;
+
+  if (req.body.donationNeeds) {
+      await prisma.donationNeed.deleteMany({ where: { eventId: event.id } });
+      updateData.donationNeeds = {
+          create: req.body.donationNeeds.map(need => ({
+              item: need.item,
+              quantity: need.quantity,
+              fulfilled: need.fulfilled || 0
+          }))
+      };
+  }
+
+  event = await prisma.event.update({
+      where: { id: event.id },
+      data: updateData,
+      include: { participants: true, donationNeeds: true }
+  });
 
   return res.json({
     message: "Event updated",
@@ -141,7 +213,7 @@ const updateEvent = async (req, res) => {
 };
 
 const deleteEvent = async (req, res) => {
-  const event = await Event.findOne({ slug: req.params.slug });
+  const event = await prisma.event.findUnique({ where: { slug: req.params.slug } });
   if (!event) {
     return res.status(404).json({ message: "Event not found" });
   }
@@ -150,71 +222,111 @@ const deleteEvent = async (req, res) => {
     return res.status(403).json({ message: "Only the organizer can delete this event" });
   }
 
-  await event.deleteOne();
+  await prisma.event.delete({ where: { id: event.id } });
   return res.json({ message: "Event deleted" });
 };
 
 const registerForEvent = async (req, res) => {
-  const event = await Event.findOne({ slug: req.params.slug });
+  let event = await prisma.event.findUnique({ 
+      where: { slug: req.params.slug },
+      include: { participants: true, donationNeeds: true }
+  });
   if (!event) {
     return res.status(404).json({ message: "Event not found" });
   }
 
-  const alreadyJoined = event.participants.some((participant) => participant.userId === req.user.sub);
+  const alreadyJoined = event.participants.some((p) => p.userId === req.user.sub && p.status !== "cancelled");
   if (alreadyJoined) {
     return res.status(409).json({ message: "You are already registered for this event" });
   }
 
-  const attendee = {
-    userId: req.user.sub,
-    fullName: req.body.fullName || "",
-    email: req.body.email || ""
-  };
+  let participantStatus = "joined";
+  let message = "Registration successful";
+  let updateData = {};
 
   if (event.currentParticipants < event.maxParticipants) {
-    event.participants.push(attendee);
-    event.currentParticipants += 1;
+    updateData.currentParticipants = { increment: 1 };
   } else {
-    event.waitlist.push(attendee);
-    event.waitlistCount += 1;
+    participantStatus = "waitlist";
+    updateData.waitlistCount = { increment: 1 };
+    message = "Added to waitlist";
   }
 
-  await event.save();
+  await prisma.participant.upsert({
+      where: {
+          eventId_userId: {
+              eventId: event.id,
+              userId: req.user.sub
+          }
+      },
+      update: {
+          status: participantStatus,
+          fullName: req.body.fullName || "",
+          email: req.body.email || ""
+      },
+      create: {
+          eventId: event.id,
+          userId: req.user.sub,
+          status: participantStatus,
+          fullName: req.body.fullName || "",
+          email: req.body.email || ""
+      }
+  });
+
+  event = await prisma.event.update({
+      where: { id: event.id },
+      data: updateData,
+      include: { participants: true, donationNeeds: true }
+  });
 
   return res.json({
-    message: event.currentParticipants <= event.maxParticipants ? "Registration successful" : "Added to waitlist",
+    message,
     event: serializeEvent(event)
   });
 };
 
 const cancelRegistration = async (req, res) => {
-  const event = await Event.findOne({ slug: req.params.slug });
+  let event = await prisma.event.findUnique({ 
+      where: { slug: req.params.slug },
+      include: { participants: { orderBy: { joinedAt: 'asc' } } }
+  });
   if (!event) {
     return res.status(404).json({ message: "Event not found" });
   }
 
-  const participantIndex = event.participants.findIndex((participant) => participant.userId === req.user.sub);
-  if (participantIndex >= 0) {
-    event.participants.splice(participantIndex, 1);
-    event.currentParticipants = Math.max(0, event.currentParticipants - 1);
-
-    if (event.waitlist.length > 0) {
-      const nextParticipant = event.waitlist.shift();
-      event.participants.push(nextParticipant);
-      event.currentParticipants += 1;
-      event.waitlistCount = Math.max(0, event.waitlistCount - 1);
-    }
-  } else {
-    const waitlistIndex = event.waitlist.findIndex((participant) => participant.userId === req.user.sub);
-    if (waitlistIndex < 0) {
-      return res.status(404).json({ message: "Registration not found" });
-    }
-
-    event.waitlist.splice(waitlistIndex, 1);
-    event.waitlistCount = Math.max(0, event.waitlistCount - 1);
+  const participant = event.participants.find((p) => p.userId === req.user.sub && p.status !== "cancelled");
+  if (!participant) {
+    return res.status(404).json({ message: "Registration not found" });
   }
 
-  await event.save();
+  let eventUpdateData = {};
+
+  if (participant.status === "joined") {
+      eventUpdateData.currentParticipants = { decrement: 1 };
+      
+      const firstWaitlist = event.participants.find(p => p.status === "waitlist");
+      if (firstWaitlist) {
+          await prisma.participant.update({
+              where: { id: firstWaitlist.id },
+              data: { status: "joined" }
+          });
+          eventUpdateData.currentParticipants = { increment: 1 };
+          eventUpdateData.waitlistCount = { decrement: 1 };
+      }
+  } else if (participant.status === "waitlist") {
+      eventUpdateData.waitlistCount = { decrement: 1 };
+  }
+
+  await prisma.participant.update({
+      where: { id: participant.id },
+      data: { status: "cancelled" }
+  });
+
+  event = await prisma.event.update({
+      where: { id: event.id },
+      data: eventUpdateData,
+      include: { participants: true, donationNeeds: true }
+  });
 
   return res.json({
     message: "Registration cancelled",
@@ -223,7 +335,11 @@ const cancelRegistration = async (req, res) => {
 };
 
 const getOrganizerDashboard = async (req, res) => {
-  const events = await Event.find({ organizerId: req.user.sub }).sort({ startsAt: 1 });
+  const events = await prisma.event.findMany({ 
+      where: { organizerId: req.user.sub },
+      orderBy: { startsAt: 'asc' },
+      include: { participants: true, donationNeeds: true }
+  });
 
   const analytics = events.reduce(
     (accumulator, event) => {

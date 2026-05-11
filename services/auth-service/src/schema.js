@@ -11,6 +11,8 @@ const typeDefs = gql`
     email: String
     phone: String
     role: String!
+    isVerified: Boolean!
+    isOrganizerApproved: Boolean!
   }
 
   type AuthPayload {
@@ -27,6 +29,7 @@ const typeDefs = gql`
     me: User
     user(id: ID!): User
     users: [User]
+    pendingOrganizers: [User]
   }
 
   type Mutation {
@@ -36,6 +39,9 @@ const typeDefs = gql`
     
     # Login with username and password
     login(username: String!, password: String!): AuthPayload!
+
+    # Admin: Verify Organizer
+    verifyOrganizer(userId: ID!, status: Boolean!): User!
     
     # Legacy support
     register(fullName: String!, email: String!, password: String!, role: String): OtpStatus!

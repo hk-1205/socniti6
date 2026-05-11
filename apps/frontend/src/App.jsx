@@ -14,6 +14,7 @@ import DonationsPage from "./pages/DonationsPage";
 import ContactPage from "./pages/ContactPage";
 import ProfilePage from "./pages/ProfilePage";
 import SettingsPage from "./pages/SettingsPage";
+import AdminDashboardPage from "./pages/AdminDashboardPage";
 
 function RoleProtectedRoute({ children, roles }) {
   const { user } = useAuth();
@@ -98,6 +99,16 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <SettingsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute>
+                <RoleProtectedRoute roles={["admin"]}>
+                  <AdminDashboardPage />
+                </RoleProtectedRoute>
               </ProtectedRoute>
             }
           />

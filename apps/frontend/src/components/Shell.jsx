@@ -97,6 +97,18 @@ export default function Shell({ children }) {
                       >
                         Settings
                       </button>
+                      {user.role === "admin" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigate("/admin");
+                            setMenuOpen(false);
+                          }}
+                          className="w-full px-4 py-3 text-left text-sm font-semibold text-indigo-600 hover:bg-mist transition-colors"
+                        >
+                          Admin Dashboard
+                        </button>
+                      )}
                       <div className="border-t border-ink/10" />
                       <button
                         type="button"

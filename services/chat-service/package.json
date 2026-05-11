@@ -14,7 +14,7 @@
     "express": "^4.21.2",
     "graphql": "^16.13.1",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.9.5",
+    "@socniti/database": "*",
     "socket.io": "^4.8.1",
     "ws": "^8.18.0"
   },

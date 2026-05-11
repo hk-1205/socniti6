@@ -1,0 +1,16 @@
+{
+  "name": "@socniti/database",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "commonjs",
+  "dependencies": {
+    "@prisma/client": "^5.10.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.10.0"
+  },
+  "scripts": {
+    "generate": "prisma generate",
+    "push": "prisma db push"
+  }
+}

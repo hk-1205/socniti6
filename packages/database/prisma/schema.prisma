@@ -1,0 +1,120 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id         String   @id @default(uuid())
+  fullName   String
+  username   String   @unique
+  email      String?  @unique
+  phone      String?  @unique
+  password   String?
+  role       String   @default("user") // "user", "organizer", "admin"
+  isVerified Boolean  @default(false) // Email verified
+  isOrganizerApproved Boolean @default(false) // Admin approved
+  otp        String?
+  otpExpires DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  // Relations
+  eventsAsOrganizer Event[]       @relation("EventOrganizer")
+  eventParticipants Participant[]
+  messages          Message[]
+  donations         Donation[]
+}
+
+model Event {
+  id                  String   @id @default(uuid())
+  title               String
+  slug                String   @unique
+  description         String
+  category            String
+  imageUrl            String?
+  
+  organizerId         String
+  organizer           User     @relation("EventOrganizer", fields: [organizerId], references: [id])
+  organizerName       String?
+  
+  locationName        String
+  address             String?
+  city                String?
+  state               String?
+  lat                 Float
+  lng                 Float
+  
+  startsAt            DateTime
+  endsAt              DateTime?
+  maxParticipants     Int      @default(50)
+  currentParticipants Int      @default(0)
+  waitlistCount       Int      @default(0)
+  status              String   @default("upcoming") // upcoming, ongoing, completed, cancelled
+  averageRating       Float    @default(0)
+  totalReviews        Int      @default(0)
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  donationNeeds       DonationNeed[]
+  participants        Participant[]
+  messages            Message[]
+  donations           Donation[]
+}
+
+model Participant {
+  id        String   @id @default(uuid())
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status    String   @default("joined") // joined, waitlist, cancelled
+  fullName  String?
+  email     String?
+  joinedAt  DateTime @default(now())
+  
+  @@unique([eventId, userId])
+}
+
+model DonationNeed {
+  id        String @id @default(uuid())
+  eventId   String
+  event     Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  item      String
+  quantity  Int
+  fulfilled Int    @default(0)
+}
+
+model Message {
+  id         String   @id @default(uuid())
+  eventId    String
+  event      Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  senderId   String
+  sender     User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  senderName String
+  content    String
+  type       String   @default("text") // text, system
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Donation {
+  id         String   @id @default(uuid())
+  eventId    String
+  event      Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  donorId    String
+  donor      User     @relation(fields: [donorId], references: [id], onDelete: Cascade)
+  donorName  String
+  amount     Float?
+  item       String?
+  quantity   Int?
+  type       String   // monetary, item
+  status     String   @default("pending") // pending, completed, cancelled
+  message    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}

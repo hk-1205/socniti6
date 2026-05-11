@@ -1,10 +1,10 @@
-const Event = require("../models/Event");
+const { prisma } = require("@socniti/database");
 const { toSlug, EVENT_CATEGORIES } = require("@socniti/shared");
 const { distanceInKm } = require("../utils/geo");
 
 const serializeEvent = (event, viewerCoordinates) => {
   const base = {
-    id: event._id.toString(),
+    id: event.id,
     title: event.title,
     slug: event.slug,
     description: event.description,
@@ -16,7 +16,7 @@ const serializeEvent = (event, viewerCoordinates) => {
     address: event.address || null,
     city: event.city || null,
     state: event.state || null,
-    coordinates: event.coordinates,
+    coordinates: { lat: event.lat, lng: event.lng },
     startsAt: event.startsAt.toISOString(),
     endsAt: event.endsAt ? event.endsAt.toISOString() : null,
     maxParticipants: event.maxParticipants,
@@ -24,18 +24,18 @@ const serializeEvent = (event, viewerCoordinates) => {
     waitlistCount: event.waitlistCount,
     status: event.status,
     donationNeeds: event.donationNeeds || [],
-    participants: event.participants?.map(p => ({
+    participants: (event.participants || []).filter(p => p.status === "joined").map(p => ({
       userId: p.userId,
       fullName: p.fullName || null,
       email: p.email || null,
       joinedAt: p.joinedAt.toISOString()
-    })) || [],
-    waitlist: event.waitlist?.map(p => ({
+    })),
+    waitlist: (event.participants || []).filter(p => p.status === "waitlist").map(p => ({
       userId: p.userId,
       fullName: p.fullName || null,
       email: p.email || null,
       joinedAt: p.joinedAt.toISOString()
-    })) || [],
+    })),
     averageRating: event.averageRating || 0,
     totalReviews: event.totalReviews || 0,
     createdAt: event.createdAt.toISOString(),
@@ -46,8 +46,8 @@ const serializeEvent = (event, viewerCoordinates) => {
     base.distanceKm = distanceInKm(
       viewerCoordinates.lat,
       viewerCoordinates.lng,
-      event.coordinates.lat,
-      event.coordinates.lng
+      event.lat,
+      event.lng
     );
   }
 
@@ -59,25 +59,30 @@ const resolvers = {
     events: async (_, args) => {
       const { search, category, city, status, date, lat, lng, maxDistanceKm, organizerId } = args;
 
-      const query = {};
+      const where = {};
       if (search) {
-        query.$or = [
-          { title: { $regex: search, $options: "i" } },
-          { description: { $regex: search, $options: "i" } }
+        where.OR = [
+          { title: { contains: search, mode: "insensitive" } },
+          { description: { contains: search, mode: "insensitive" } }
         ];
       }
-      if (category) query.category = category;
-      if (city) query.city = city;
-      if (status) query.status = status;
-      if (organizerId) query.organizerId = organizerId;
+      if (category) where.category = category;
+      if (city) where.city = city;
+      if (status) where.status = status;
+      if (organizerId) where.organizerId = organizerId;
       if (date) {
         const start = new Date(date);
         const end = new Date(date);
         end.setDate(end.getDate() + 1);
-        query.startsAt = { $gte: start, $lt: end };
+        where.startsAt = { gte: start, lt: end };
       }
 
-      const events = await Event.find(query).sort({ startsAt: 1 });
+      const events = await prisma.event.findMany({
+        where,
+        orderBy: { startsAt: 'asc' },
+        include: { participants: true, donationNeeds: true }
+      });
+      
       const viewerCoordinates = lat && lng ? { lat: Number(lat), lng: Number(lng) } : null;
       let data = events.map((event) => serializeEvent(event, viewerCoordinates));
 
@@ -98,7 +103,10 @@ const resolvers = {
     },
 
     event: async (_, { slug }) => {
-      const event = await Event.findOne({ slug });
+      const event = await prisma.event.findUnique({ 
+          where: { slug },
+          include: { participants: true, donationNeeds: true }
+      });
       if (!event) {
         throw new Error("Event not found");
       }
@@ -110,7 +118,11 @@ const resolvers = {
         throw new Error("Authentication required");
       }
 
-      const events = await Event.find({ organizerId: context.user.sub }).sort({ startsAt: 1 });
+      const events = await prisma.event.findMany({ 
+          where: { organizerId: context.user.sub },
+          orderBy: { startsAt: 'asc' },
+          include: { participants: true, donationNeeds: true }
+      });
 
       const analytics = events.reduce(
         (acc, event) => {
@@ -135,27 +147,44 @@ const resolvers = {
         throw new Error("Authentication required");
       }
 
+      // Check if organizer is verified
+      const user = await prisma.user.findUnique({ where: { id: context.user.sub } });
+      if (!user) throw new Error("User not found");
+      if (user.role === "organizer" && !user.isOrganizerApproved) {
+        throw new Error("Your organizer account must be verified by an admin before you can create events.");
+      }
+
       const slugBase = toSlug(input.title);
       const slug = `${slugBase}-${Date.now().toString().slice(-6)}`;
 
-      const event = await Event.create({
-        title: input.title,
-        slug,
-        description: input.description,
-        category: input.category,
-        imageUrl: input.imageUrl || "",
-        organizerId: context.user.sub,
-        organizerName: input.organizerName || "",
-        locationName: input.locationName,
-        address: input.address || "",
-        city: input.city || "",
-        state: input.state || "",
-        coordinates: input.coordinates,
-        startsAt: new Date(input.startsAt),
-        endsAt: input.endsAt ? new Date(input.endsAt) : null,
-        maxParticipants: input.maxParticipants || 50,
-        status: "upcoming",
-        donationNeeds: input.donationNeeds || []
+      const event = await prisma.event.create({
+        data: {
+          title: input.title,
+          slug,
+          description: input.description,
+          category: input.category,
+          imageUrl: input.imageUrl || "",
+          organizerId: context.user.sub,
+          organizerName: input.organizerName || "",
+          locationName: input.locationName,
+          address: input.address || "",
+          city: input.city || "",
+          state: input.state || "",
+          lat: input.coordinates.lat,
+          lng: input.coordinates.lng,
+          startsAt: new Date(input.startsAt),
+          endsAt: input.endsAt ? new Date(input.endsAt) : null,
+          maxParticipants: input.maxParticipants || 50,
+          status: "upcoming",
+          donationNeeds: {
+              create: (input.donationNeeds || []).map(need => ({
+                  item: need.item,
+                  quantity: need.quantity,
+                  fulfilled: need.fulfilled || 0
+              }))
+          }
+        },
+        include: { donationNeeds: true, participants: true }
       });
 
       return {
@@ -170,7 +199,7 @@ const resolvers = {
         throw new Error("Authentication required");
       }
 
-      const event = await Event.findOne({ slug });
+      let event = await prisma.event.findUnique({ where: { slug } });
       if (!event) {
         throw new Error("Event not found");
       }
@@ -179,23 +208,42 @@ const resolvers = {
         throw new Error("Only the organizer can update this event");
       }
 
-      // Update fields
-      if (input.title) event.title = input.title;
-      if (input.description) event.description = input.description;
-      if (input.category) event.category = input.category;
-      if (input.imageUrl !== undefined) event.imageUrl = input.imageUrl;
-      if (input.locationName) event.locationName = input.locationName;
-      if (input.address !== undefined) event.address = input.address;
-      if (input.city !== undefined) event.city = input.city;
-      if (input.state !== undefined) event.state = input.state;
-      if (input.coordinates) event.coordinates = input.coordinates;
-      if (input.startsAt) event.startsAt = new Date(input.startsAt);
-      if (input.endsAt !== undefined) event.endsAt = input.endsAt ? new Date(input.endsAt) : null;
-      if (input.maxParticipants) event.maxParticipants = input.maxParticipants;
-      if (input.status) event.status = input.status;
-      if (input.donationNeeds) event.donationNeeds = input.donationNeeds;
+      const updateData = {};
+      if (input.title) updateData.title = input.title;
+      if (input.description) updateData.description = input.description;
+      if (input.category) updateData.category = input.category;
+      if (input.imageUrl !== undefined) updateData.imageUrl = input.imageUrl;
+      if (input.locationName) updateData.locationName = input.locationName;
+      if (input.address !== undefined) updateData.address = input.address;
+      if (input.city !== undefined) updateData.city = input.city;
+      if (input.state !== undefined) updateData.state = input.state;
+      if (input.coordinates) {
+          updateData.lat = input.coordinates.lat;
+          updateData.lng = input.coordinates.lng;
+      }
+      if (input.startsAt) updateData.startsAt = new Date(input.startsAt);
+      if (input.endsAt !== undefined) updateData.endsAt = input.endsAt ? new Date(input.endsAt) : null;
+      if (input.maxParticipants) updateData.maxParticipants = input.maxParticipants;
+      if (input.status) updateData.status = input.status;
 
-      await event.save();
+      // Note: Updating nested donationNeeds requires a deletion and recreation or complex upsert. 
+      // For simplicity here we just delete existing and create new ones if provided.
+      if (input.donationNeeds) {
+          await prisma.donationNeed.deleteMany({ where: { eventId: event.id } });
+          updateData.donationNeeds = {
+              create: input.donationNeeds.map(need => ({
+                  item: need.item,
+                  quantity: need.quantity,
+                  fulfilled: need.fulfilled || 0
+              }))
+          };
+      }
+
+      event = await prisma.event.update({
+          where: { id: event.id },
+          data: updateData,
+          include: { donationNeeds: true, participants: true }
+      });
 
       return {
         success: true,
@@ -209,7 +257,7 @@ const resolvers = {
         throw new Error("Authentication required");
       }
 
-      const event = await Event.findOne({ slug });
+      const event = await prisma.event.findUnique({ where: { slug } });
       if (!event) {
         throw new Error("Event not found");
       }
@@ -218,7 +266,7 @@ const resolvers = {
         throw new Error("Only the organizer can delete this event");
       }
 
-      await event.deleteOne();
+      await prisma.event.delete({ where: { id: event.id } });
 
       return {
         success: true,
@@ -232,34 +280,60 @@ const resolvers = {
         throw new Error("Authentication required");
       }
 
-      const event = await Event.findOne({ slug });
+      let event = await prisma.event.findUnique({ 
+          where: { slug },
+          include: { participants: true, donationNeeds: true }
+      });
       if (!event) {
         throw new Error("Event not found");
       }
 
-      const alreadyJoined = event.participants.some((p) => p.userId === context.user.sub);
+      const alreadyJoined = event.participants.some((p) => p.userId === context.user.sub && p.status !== "cancelled");
       if (alreadyJoined) {
         throw new Error("You are already registered for this event");
       }
 
-      const attendee = {
-        userId: context.user.sub,
-        fullName: input?.fullName || "",
-        email: input?.email || ""
-      };
+      let participantStatus = "joined";
+      let message = "Registration successful";
+      
+      let updateData = {};
 
-      let message;
       if (event.currentParticipants < event.maxParticipants) {
-        event.participants.push(attendee);
-        event.currentParticipants += 1;
-        message = "Registration successful";
+          updateData.currentParticipants = { increment: 1 };
       } else {
-        event.waitlist.push(attendee);
-        event.waitlistCount += 1;
-        message = "Added to waitlist";
+          participantStatus = "waitlist";
+          updateData.waitlistCount = { increment: 1 };
+          message = "Added to waitlist";
       }
 
-      await event.save();
+      // Upsert the participant
+      await prisma.participant.upsert({
+          where: {
+              eventId_userId: {
+                  eventId: event.id,
+                  userId: context.user.sub
+              }
+          },
+          update: {
+              status: participantStatus,
+              fullName: input?.fullName || "",
+              email: input?.email || ""
+          },
+          create: {
+              eventId: event.id,
+              userId: context.user.sub,
+              status: participantStatus,
+              fullName: input?.fullName || "",
+              email: input?.email || ""
+          }
+      });
+
+      // Update event counts
+      event = await prisma.event.update({
+          where: { id: event.id },
+          data: updateData,
+          include: { participants: true, donationNeeds: true }
+      });
 
       return {
         success: true,
@@ -273,34 +347,48 @@ const resolvers = {
         throw new Error("Authentication required");
       }
 
-      const event = await Event.findOne({ slug });
+      let event = await prisma.event.findUnique({ 
+          where: { slug },
+          include: { participants: { orderBy: { joinedAt: 'asc' } } }
+      });
       if (!event) {
         throw new Error("Event not found");
       }
 
-      const participantIndex = event.participants.findIndex((p) => p.userId === context.user.sub);
-      if (participantIndex >= 0) {
-        event.participants.splice(participantIndex, 1);
-        event.currentParticipants = Math.max(0, event.currentParticipants - 1);
-
-        // Move first waitlist person to participants
-        if (event.waitlist.length > 0) {
-          const nextParticipant = event.waitlist.shift();
-          event.participants.push(nextParticipant);
-          event.currentParticipants += 1;
-          event.waitlistCount = Math.max(0, event.waitlistCount - 1);
-        }
-      } else {
-        const waitlistIndex = event.waitlist.findIndex((p) => p.userId === context.user.sub);
-        if (waitlistIndex < 0) {
-          throw new Error("Registration not found");
-        }
-
-        event.waitlist.splice(waitlistIndex, 1);
-        event.waitlistCount = Math.max(0, event.waitlistCount - 1);
+      const participant = event.participants.find((p) => p.userId === context.user.sub && p.status !== "cancelled");
+      if (!participant) {
+        throw new Error("Registration not found");
       }
 
-      await event.save();
+      let eventUpdateData = {};
+
+      if (participant.status === "joined") {
+          eventUpdateData.currentParticipants = { decrement: 1 };
+          
+          // Move first waitlist person to joined
+          const firstWaitlist = event.participants.find(p => p.status === "waitlist");
+          if (firstWaitlist) {
+              await prisma.participant.update({
+                  where: { id: firstWaitlist.id },
+                  data: { status: "joined" }
+              });
+              eventUpdateData.currentParticipants = { increment: 1 }; // cancels out decrement
+              eventUpdateData.waitlistCount = { decrement: 1 };
+          }
+      } else if (participant.status === "waitlist") {
+          eventUpdateData.waitlistCount = { decrement: 1 };
+      }
+
+      await prisma.participant.update({
+          where: { id: participant.id },
+          data: { status: "cancelled" }
+      });
+
+      event = await prisma.event.update({
+          where: { id: event.id },
+          data: eventUpdateData,
+          include: { participants: true, donationNeeds: true }
+      });
 
       return {
         success: true,
@@ -312,14 +400,12 @@ const resolvers = {
 
   Event: {
     organizer: (event) => {
-      // Return a reference to the User type from Auth Service
       return { __typename: "User", id: event.organizerId };
     }
   },
 
   Participant: {
     user: (participant) => {
-      // Return a reference to the User type from Auth Service
       return { __typename: "User", id: participant.userId };
     }
   }

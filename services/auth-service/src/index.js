@@ -1,7 +1,7 @@
 const { ApolloServer } = require("@apollo/server");
 const { startStandaloneServer } = require("@apollo/server/standalone");
 const { buildSubgraphSchema } = require("@apollo/subgraph");
-const mongoose = require("mongoose");
+const { prisma } = require("@socniti/database");
 const dotenv = require("dotenv");
 const path = require("path");
 
@@ -11,33 +11,26 @@ const typeDefs = require("./schema");
 const resolvers = require("./resolvers");
 
 async function startServer() {
-    const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/socniti";
-    const PORT = 4001;
+    const PORT = process.env.AUTH_SERVICE_PORT || 4001;
 
     console.log("🔄 Starting Auth Service...");
-    console.log(`📊 MongoDB URI: ${MONGODB_URI.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@')}`);
 
     try {
-        await mongoose.connect(MONGODB_URI, {
-            serverSelectionTimeoutMS: 30000,
-            socketTimeoutMS: 45000,
-        });
-        console.log("✅ MongoDB connected successfully");
-        console.log(`📦 Database: ${mongoose.connection.name}`);
+        await prisma.$connect();
+        console.log("✅ PostgreSQL/Prisma connected successfully");
     } catch (error) {
         console.error("\n" + "=".repeat(60));
-        console.error("❌ MONGODB CONNECTION FAILED");
+        console.error("❌ DATABASE CONNECTION FAILED");
         console.error("=".repeat(60));
         console.error("Error:", error.message);
         console.error("\n💡 Possible solutions:");
-        console.error("  1. Check if MongoDB is running");
-        console.error("  2. Verify MONGODB_URI in .env file");
+        console.error("  1. Check if PostgreSQL/Supabase is running");
+        console.error("  2. Verify DATABASE_URL in .env file");
         console.error("  3. Check network/firewall settings");
-        console.error("  4. For MongoDB Atlas: Check IP whitelist");
         console.error("=".repeat(60) + "\n");
         
-        // Continue without MongoDB for development
-        console.log("⚠️  Continuing without MongoDB (limited functionality)");
+        // Continue without DB for development if needed, but usually it crashes
+        console.log("⚠️  Continuing without DB (limited functionality)");
     }
 
     const server = new ApolloServer({

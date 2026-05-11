@@ -2,7 +2,7 @@ const express = require("express");
 const { createServer } = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
-const mongoose = require("mongoose");
+const { prisma } = require("@socniti/database");
 const jwt = require("jsonwebtoken");
 const dotenv = require("dotenv");
 const path = require("path");
@@ -13,15 +13,12 @@ const { parse } = require("graphql");
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
-const Message = require("./models/Message");
-
 const app = express();
 const httpServer = createServer(app);
 
 const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-me";
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/socniti";
-const PORT = 4003;
-const GRAPHQL_PORT = 4006;
+const PORT = process.env.CHAT_WS_PORT || 4003;
+const GRAPHQL_PORT = process.env.CHAT_GRAPHQL_PORT || 4006;
 
 console.log("🔄 Starting Chat Service...");
 
@@ -82,9 +79,11 @@ io.on("connection", (socket) => {
 
     // Send recent messages
     try {
-      const messages = await Message.find({ eventId })
-        .sort({ createdAt: -1 })
-        .limit(50);
+      const messages = await prisma.message.findMany({
+          where: { eventId },
+          orderBy: { createdAt: 'desc' },
+          take: 50
+      });
       
       socket.emit("message-history", messages.reverse());
     } catch (err) {
@@ -112,17 +111,19 @@ io.on("connection", (socket) => {
     }
 
     try {
-      const message = await Message.create({
-        eventId,
-        senderId: socket.userId,
-        senderName: socket.username,
-        content: content.trim(),
-        type: "text",
+      const message = await prisma.message.create({
+          data: {
+              eventId,
+              senderId: socket.userId,
+              senderName: socket.username,
+              content: content.trim(),
+              type: "text",
+          }
       });
 
       // Broadcast to event room
       io.to(`event-${eventId}`).emit("new-message", {
-        id: message._id.toString(),
+        id: message.id,
         eventId: message.eventId,
         senderId: message.senderId,
         senderName: message.senderName,
@@ -175,9 +176,11 @@ app.get("/api/chat/events/:eventId/messages", async (req, res) => {
     const { eventId } = req.params;
     const limit = parseInt(req.query.limit) || 50;
     
-    const messages = await Message.find({ eventId })
-      .sort({ createdAt: -1 })
-      .limit(limit);
+    const messages = await prisma.message.findMany({
+        where: { eventId },
+        orderBy: { createdAt: 'desc' },
+        take: limit
+    });
     
     res.json({ messages: messages.reverse() });
   } catch (err) {
@@ -219,12 +222,14 @@ const typeDefs = parse(`
 const resolvers = {
   Query: {
     eventMessages: async (_, { eventId, limit = 50 }) => {
-      const messages = await Message.find({ eventId })
-        .sort({ createdAt: -1 })
-        .limit(limit);
+      const messages = await prisma.message.findMany({
+          where: { eventId },
+          orderBy: { createdAt: 'desc' },
+          take: limit
+      });
       
       return messages.reverse().map(msg => ({
-        id: msg._id.toString(),
+        id: msg.id,
         eventId: msg.eventId,
         senderId: msg.senderId,
         senderName: msg.senderName,
@@ -251,13 +256,9 @@ const server = new ApolloServer({
 });
 
 // Start services
-mongoose
-  .connect(MONGODB_URI, { 
-    serverSelectionTimeoutMS: 30000,
-    socketTimeoutMS: 45000,
-  })
+prisma.$connect()
   .then(async () => {
-    console.log("✅ MongoDB connected successfully");
+    console.log("✅ PostgreSQL/Prisma connected successfully");
 
     // Start WebSocket server
     httpServer.listen(PORT, () => {
@@ -289,7 +290,7 @@ mongoose
     console.error("=".repeat(60));
     console.error("Error:", error.message);
     console.error("\n💡 Possible solutions:");
-    console.error("  1. Check if MongoDB is running");
+    console.error("  1. Check if PostgreSQL/Supabase is running");
     console.error(`  2. Check if ports ${PORT} or ${GRAPHQL_PORT} are in use`);
     console.error("=".repeat(60) + "\n");
     process.exit(1);
